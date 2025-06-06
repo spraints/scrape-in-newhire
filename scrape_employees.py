@@ -9,50 +9,79 @@ def login(session, base_url, username, password):
     """Handle the login process"""
     try:
         # Get the main page to find the login link
+        print("Getting main page...")
         response = session.get(base_url)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
         
         # Find the login link
-        login_link = soup.find('a', text='Login')
+        print("Looking for login link...")
+        login_link = soup.find('a', string='Login')
         if not login_link:
+            print("Login link not found. Available links:")
+            for link in soup.find_all('a'):
+                print(f"- {link.get('href')}: {link.string}")
             raise Exception("Could not find login link")
         
         # Get the login page
         login_url = login_link['href']
         if not login_url.startswith('http'):
             login_url = base_url.rstrip('/') + '/' + login_url.lstrip('/')
+        print(f"Found login URL: {login_url}")
         
+        print("Getting login page...")
         response = session.get(login_url)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
         
         # Find the login form
+        print("Looking for login form...")
         login_form = soup.find('form')
         if not login_form:
+            print("Login form not found. Available forms:")
+            for form in soup.find_all('form'):
+                print(f"- Form action: {form.get('action')}")
+                print(f"  Method: {form.get('method')}")
+                print(f"  Inputs: {[input.get('name') for input in form.find_all('input')]}")
             raise Exception("Could not find login form")
         
         # Get the form action URL
         form_action = login_form.get('action', '')
         if not form_action.startswith('http'):
             form_action = base_url.rstrip('/') + '/' + form_action.lstrip('/')
+        print(f"Form action URL: {form_action}")
         
         # Prepare login data
         login_data = {
-            'username': username,
-            'password': password
+            'user': username,
+            'pass': password
         }
         
         # Add any hidden form fields
-        for hidden in login_form.find_all('input', type='hidden'):
-            login_data[hidden.get('name')] = hidden.get('value', '')
+        print("Found form fields:")
+        for input_field in login_form.find_all('input'):
+            name = input_field.get('name')
+            type_ = input_field.get('type')
+            if type_ == 'hidden':
+                value = input_field.get('value', '')
+                login_data[name] = value
+                print(f"- Hidden field: {name}={value}")
+            else:
+                print(f"- Input field: {name} (type: {type_})")
         
         # Submit the login form
+        print("Submitting login form...")
         response = session.post(form_action, data=login_data)
         response.raise_for_status()
         
+        # Print the response URL and status
+        print(f"Response URL: {response.url}")
+        print(f"Response status: {response.status_code}")
+        
         # Verify login was successful
         if 'login' in response.url.lower():
+            print("Login page content:")
+            print(response.text[:1000])  # Print first 1000 chars of response
             raise Exception("Login failed - still on login page")
         
         return True
