@@ -90,12 +90,112 @@ def login(session, base_url, username, password):
         print(f"Error during login: {e}")
         return False
 
+def get_new_hires(session, base_url):
+    """Navigate to new hires view and submit the date form"""
+    try:
+        # Get the report page
+        print("Getting report page...")
+        response = session.get(f"{base_url}/report")
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # Find and click the "View New Hires" link
+        print("Looking for View New Hires link...")
+        new_hires_link = soup.find('a', string='View New Hires')
+        if not new_hires_link:
+            raise Exception("Could not find View New Hires link")
+        
+        new_hires_url = new_hires_link['href']
+        if not new_hires_url.startswith('http'):
+            new_hires_url = base_url.rstrip('/') + '/' + new_hires_url.lstrip('/')
+        
+        print(f"Getting new hires page: {new_hires_url}")
+        response = session.get(new_hires_url)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # Find the date form
+        print("Looking for date form...")
+        date_form = soup.find('form', class_='form')
+        if not date_form:
+            raise Exception("Could not find date form")
+        
+        # Get the form action URL
+        form_action = date_form.get('action', '')
+        if not form_action.startswith('http'):
+            form_action = base_url.rstrip('/') + '/' + form_action.lstrip('/')
+        
+        # Prepare form data
+        form_data = {
+            'from': '2015-01-01',  # Jan 1, 2015
+            'to': datetime.now().strftime('%Y-%m-%d'),  # Today
+            'employee_ssn': ''  # Empty SSN to get all records
+        }
+        
+        # Submit the form
+        print("Submitting date form...")
+        response = session.post(form_action, data=form_data)
+        response.raise_for_status()
+        
+        return response
+        
+    except requests.RequestException as e:
+        print(f"Error getting new hires: {e}")
+        return None
+
+def parse_employee_records(response):
+    """Parse employee records from the response"""
+    soup = BeautifulSoup(response.text, 'html.parser')
+    employees = []
+    
+    # Find all employee rows
+    rows = soup.find_all('tr')
+    for row in rows:
+        # Skip header row
+        if row.find('th'):
+            continue
+            
+        # Get all cells
+        cells = row.find_all('td')
+        if len(cells) >= 11:  # We expect 11 columns
+            try:
+                # Extract data from cells
+                first_name = cells[0].text.strip()
+                middle_name = cells[1].text.strip()
+                last_name = cells[2].text.strip()
+                suffix = cells[3].text.strip()
+                ssn = cells[4].text.strip()
+                address = cells[5].text.strip()
+                state = cells[6].text.strip()
+                hire_date = cells[7].text.strip()
+                birth_date = cells[8].text.strip()
+                received_date = cells[9].text.strip()
+                sent_date = cells[10].text.strip()
+                
+                # Add to our list
+                employees.append({
+                    'first_name': first_name,
+                    'middle_name': middle_name,
+                    'last_name': last_name,
+                    'suffix': suffix,
+                    'ssn': ssn,
+                    'address': address,
+                    'state': state,
+                    'hire_date': hire_date,
+                    'birth_date': birth_date,
+                    'received_date': received_date,
+                    'sent_date': sent_date
+                })
+                
+            except (IndexError, AttributeError) as e:
+                print(f"Error parsing row: {e}")
+                continue
+    
+    return employees
+
 def scrape_employees():
     # Base URL
     base_url = "https://in-newhire.com"
-    
-    # Initialize lists to store data
-    employees = []
     
     # Headers to mimic a browser request
     headers = {
@@ -115,51 +215,29 @@ def scrape_employees():
         print("Failed to login. Exiting...")
         return None
     
-    try:
-        # Make the request to the main page after login
-        response = session.get(base_url)
-        response.raise_for_status()
-        
-        # Parse the HTML content
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        # Find all employee entries
-        # Note: You'll need to adjust these selectors based on the actual HTML structure
-        employee_entries = soup.find_all('div', class_='employee-entry')
-        
-        for entry in employee_entries:
-            try:
-                # Extract employee information
-                # Note: Adjust these selectors based on the actual HTML structure
-                name = entry.find('h2', class_='employee-name').text.strip()
-                status = entry.find('span', class_='status').text.strip()
-                date = entry.find('span', class_='date').text.strip()
-                
-                # Add to our list
-                employees.append({
-                    'name': name,
-                    'status': status,
-                    'date': date
-                })
-                
-            except AttributeError as e:
-                print(f"Error parsing employee entry: {e}")
-                continue
-        
-        # Convert to DataFrame
-        df = pd.DataFrame(employees)
-        
-        # Save to CSV
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = f'employees_{timestamp}.csv'
-        df.to_csv(filename, index=False)
-        print(f"Data saved to {filename}")
-        
-        return df
-        
-    except requests.RequestException as e:
-        print(f"Error fetching the website: {e}")
+    # Get new hires page
+    response = get_new_hires(session, base_url)
+    if not response:
+        print("Failed to get new hires page. Exiting...")
         return None
+    
+    # Parse employee records
+    employees = parse_employee_records(response)
+    
+    if not employees:
+        print("No employee records found.")
+        return None
+    
+    # Convert to DataFrame
+    df = pd.DataFrame(employees)
+    
+    # Save to CSV
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    filename = f'employees_{timestamp}.csv'
+    df.to_csv(filename, index=False)
+    print(f"Data saved to {filename}")
+    
+    return df
 
 if __name__ == "__main__":
     print("Starting to scrape employee data...")
@@ -167,5 +245,5 @@ if __name__ == "__main__":
     if df is not None:
         print("\nEmployee Data Summary:")
         print(f"Total records found: {len(df)}")
-        print("\nStatus distribution:")
-        print(df['status'].value_counts()) 
+        print("\nRecords by state:")
+        print(df['state'].value_counts()) 
