@@ -2,6 +2,8 @@
 
 This script scrapes employee data from in-newhire.com, including both new hires and terminations.
 
+Cursor wrote this whole thing. It hasn't updated this README, but the content here is pretty close.
+
 ## Setup
 
 1. Install the required dependencies:
