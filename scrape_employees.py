@@ -90,27 +90,32 @@ def login(session, base_url, username, password):
         print(f"Error during login: {e}")
         return False
 
-def get_new_hires(session, base_url):
-    """Navigate to new hires view and submit the date form"""
+def get_report_page(session, base_url, report_type):
+    """Navigate to report view and submit the date form"""
     try:
         # Get the report page
-        print("Getting report page...")
+        print(f"Getting {report_type} report page...")
         response = session.get(f"{base_url}/report")
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # Find and click the "View New Hires" link
-        print("Looking for View New Hires link...")
-        new_hires_link = soup.find('a', string='View New Hires')
-        if not new_hires_link:
-            raise Exception("Could not find View New Hires link")
+        # Find and click the appropriate link
+        print(f"Looking for {report_type} link...")
+        if report_type == "new_hires":
+            link_text = "View New Hires"
+        else:  # terminations
+            link_text = "View Terminations"
+            
+        report_link = soup.find('a', string=link_text)
+        if not report_link:
+            raise Exception(f"Could not find {link_text} link")
         
-        new_hires_url = new_hires_link['href']
-        if not new_hires_url.startswith('http'):
-            new_hires_url = base_url.rstrip('/') + '/' + new_hires_url.lstrip('/')
+        report_url = report_link['href']
+        if not report_url.startswith('http'):
+            report_url = base_url.rstrip('/') + '/' + report_url.lstrip('/')
         
-        print(f"Getting new hires page: {new_hires_url}")
-        response = session.get(new_hires_url)
+        print(f"Getting {report_type} page: {report_url}")
+        response = session.get(report_url)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
         
@@ -140,10 +145,10 @@ def get_new_hires(session, base_url):
         return response
         
     except requests.RequestException as e:
-        print(f"Error getting new hires: {e}")
+        print(f"Error getting {report_type} report: {e}")
         return None
 
-def parse_employee_records(response):
+def parse_employee_records(response, report_type):
     """Parse employee records from the response"""
     soup = BeautifulSoup(response.text, 'html.parser')
     employees = []
@@ -167,13 +172,18 @@ def parse_employee_records(response):
                 ssn = cells[4].text.strip()
                 address = cells[5].text.strip()
                 state = cells[6].text.strip()
-                hire_date = cells[7].text.strip()
+                
+                if report_type == "new_hires":
+                    date = cells[7].text.strip()  # hire date
+                else:
+                    date = cells[7].text.strip()  # termination date
+                    
                 birth_date = cells[8].text.strip()
                 received_date = cells[9].text.strip()
                 sent_date = cells[10].text.strip()
                 
                 # Add to our list
-                employees.append({
+                employee_data = {
                     'first_name': first_name,
                     'middle_name': middle_name,
                     'last_name': last_name,
@@ -181,11 +191,18 @@ def parse_employee_records(response):
                     'ssn': ssn,
                     'address': address,
                     'state': state,
-                    'hire_date': hire_date,
                     'birth_date': birth_date,
                     'received_date': received_date,
                     'sent_date': sent_date
-                })
+                }
+                
+                # Add the appropriate date field
+                if report_type == "new_hires":
+                    employee_data['hire_date'] = date
+                else:
+                    employee_data['termination_date'] = date
+                
+                employees.append(employee_data)
                 
             except (IndexError, AttributeError) as e:
                 print(f"Error parsing row: {e}")
@@ -215,35 +232,37 @@ def scrape_employees():
         print("Failed to login. Exiting...")
         return None
     
-    # Get new hires page
-    response = get_new_hires(session, base_url)
-    if not response:
-        print("Failed to get new hires page. Exiting...")
-        return None
-    
-    # Parse employee records
-    employees = parse_employee_records(response)
-    
-    if not employees:
-        print("No employee records found.")
-        return None
-    
-    # Convert to DataFrame
-    df = pd.DataFrame(employees)
-    
-    # Save to CSV
+    # Get timestamp for filenames
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    filename = f'employees_{timestamp}.csv'
-    df.to_csv(filename, index=False)
-    print(f"Data saved to {filename}")
     
-    return df
+    # Process new hires
+    print("\nProcessing new hires...")
+    response = get_report_page(session, base_url, "new_hires")
+    if response:
+        employees = parse_employee_records(response, "new_hires")
+        if employees:
+            df = pd.DataFrame(employees)
+            filename = f'new_hires_{timestamp}.csv'
+            df.to_csv(filename, index=False)
+            print(f"New hires data saved to {filename}")
+            print(f"Total new hire records: {len(df)}")
+        else:
+            print("No new hire records found.")
+    
+    # Process terminations
+    print("\nProcessing terminations...")
+    response = get_report_page(session, base_url, "terminations")
+    if response:
+        employees = parse_employee_records(response, "terminations")
+        if employees:
+            df = pd.DataFrame(employees)
+            filename = f'terminations_{timestamp}.csv'
+            df.to_csv(filename, index=False)
+            print(f"Terminations data saved to {filename}")
+            print(f"Total termination records: {len(df)}")
+        else:
+            print("No termination records found.")
 
 if __name__ == "__main__":
     print("Starting to scrape employee data...")
-    df = scrape_employees()
-    if df is not None:
-        print("\nEmployee Data Summary:")
-        print(f"Total records found: {len(df)}")
-        print("\nRecords by state:")
-        print(df['state'].value_counts()) 
+    scrape_employees() 
